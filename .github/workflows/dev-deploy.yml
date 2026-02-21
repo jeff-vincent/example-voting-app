@@ -1,0 +1,105 @@
+name: Dev Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: "registry:5000"
+  TAG: "${{ github.actor }}-${{ github.sha }}"
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, "${{ github.actor }}"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Clean builds directory
+        shell: bash
+        run: |
+          rm -f /builds/*.done /builds/*.request /builds/*.processing \
+                /builds/*.apply /builds/*.apply-done /builds/*.apply-log \
+                /builds/*.apply-exitcode /builds/*.exitcode \
+                /builds/*.log /builds/*.dest /builds/*.tar.gz \
+                /builds/*.yaml /builds/*.sh
+
+      # -- Build all images --
+
+      - name: Build vote image
+        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
+        with:
+          name: vote
+          context: "${{ github.workspace }}/vote"
+          image: "${{ env.REGISTRY }}/vote:${{ env.TAG }}"
+
+      - name: Build result image
+        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
+        with:
+          name: result
+          context: "${{ github.workspace }}/result"
+          image: "${{ env.REGISTRY }}/result:${{ env.TAG }}"
+
+      - name: Build worker image
+        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
+        with:
+          name: worker
+          context: "${{ github.workspace }}/worker"
+          image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
+          timeout: "900"
+
+      # -- Deploy in dependency order --
+
+      - name: Deploy vote
+        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
+        with:
+          name: "${{ github.actor }}-vote"
+          image: "${{ env.REGISTRY }}/vote:${{ env.TAG }}"
+          port: "80"
+          ingress-host: "${{ github.actor }}-vote.localhost"
+          health-check-path: "/"
+          labels: |
+            app.kubernetes.io/part-of: example-voting-app
+            app.kubernetes.io/component: vote
+            apps.example.com/github-username: ${{ github.actor }}
+          dependencies: |
+            - type: redis
+
+      - name: Deploy result
+        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
+        with:
+          name: "${{ github.actor }}-result"
+          image: "${{ env.REGISTRY }}/result:${{ env.TAG }}"
+          port: "80"
+          ingress-host: "${{ github.actor }}-result.localhost"
+          health-check-path: "/"
+          labels: |
+            app.kubernetes.io/part-of: example-voting-app
+            app.kubernetes.io/component: result
+            apps.example.com/github-username: ${{ github.actor }}
+          dependencies: |
+            - type: postgres
+
+      - name: Deploy worker
+        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
+        with:
+          name: "${{ github.actor }}-worker"
+          image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
+          port: "80"
+          ingress-host: "${{ github.actor }}-worker.localhost"
+          labels: |
+            app.kubernetes.io/part-of: example-voting-app
+            app.kubernetes.io/component: worker
+            apps.example.com/github-username: ${{ github.actor }}
+          dependencies: |
+            - type: redis
+            - type: postgres
+
+      - name: Summary
+        run: |
+          echo "🎉 Deploy complete!"
+          echo "🌐 Vote:  http://${{ github.actor }}-vote.localhost"
+          echo "🌐 Result: http://${{ github.actor }}-result.localhost"
+          echo "🌐 Worker: http://${{ github.actor }}-worker.localhost"
