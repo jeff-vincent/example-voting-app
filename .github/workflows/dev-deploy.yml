@@ -82,6 +82,10 @@ jobs:
           dependencies: |
             - type: postgres
             - type: redis
+          env: |
+            - name: DATABASE_URL
+              value: "postgres://postgres:$(POSTGRES_PASSWORD)@${{ github.actor }}-db-postgres:5432/postgres"
+          # Requires: kindling secrets set POSTGRES_PASSWORD <VALUE>
 
       - name: Deploy vote
         uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
@@ -105,7 +109,6 @@ jobs:
           image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
           port: "80"
           ingress-host: "${{ github.actor }}-worker.localhost"
-          health-check-path: "/actuator/health"
           labels: |
             app.kubernetes.io/part-of: example-voting-app
             app.kubernetes.io/component: worker
@@ -114,14 +117,9 @@ jobs:
             - type: postgres
             - type: redis
           env: |
-            POSTGRES_PASSWORD:
-              secretKeyRef:
-                name: kindling-secret-postgres-password
-                key: value
-
-      - name: Summary
-        run: |
-          echo "🎉 Deploy complete!"
-          echo "🌐 Result: http://${{ github.actor }}-result.localhost"
-          echo "🌐 Vote: http://${{ github.actor }}-vote.localhost"
-          echo "🌐 Worker: http://${{ github.actor }}-worker.localhost"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kindling-secret-postgres-password
+                  key: value
+          # Requires: kindling secrets set POSTGRES_PASSWORD <VALUE>
