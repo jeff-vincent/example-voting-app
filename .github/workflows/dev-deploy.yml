@@ -28,29 +28,67 @@ jobs:
 
       # -- Build all images --
 
-      - name: Build vote image
-        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
-        with:
-          name: vote
-          context: "${{ github.workspace }}/vote"
-          image: "${{ env.REGISTRY }}/vote:${{ env.TAG }}"
-
       - name: Build result image
         uses: jeff-vincent/kindling/.github/actions/kindling-build@main
         with:
           name: result
-          context: "${{ github.workspace }}/result"
+          context: ${{ github.workspace }}/result
           image: "${{ env.REGISTRY }}/result:${{ env.TAG }}"
+
+      - name: Build vote image
+        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
+        with:
+          name: vote
+          context: ${{ github.workspace }}/vote
+          image: "${{ env.REGISTRY }}/vote:${{ env.TAG }}"
+
+      - name: Patch worker Dockerfile for Kaniko
+        shell: bash
+        run: |
+          cd ${{ github.workspace }}/worker
+          sed -i 's/FROM --platform=\${BUILDPLATFORM} /FROM /g' Dockerfile
+          sed -i '/^ARG TARGETPLATFORM$/d' Dockerfile
+          sed -i '/^ARG TARGETARCH$/d' Dockerfile
+          sed -i '/^ARG BUILDPLATFORM$/d' Dockerfile
+          sed -i '/^ARG TARGETOS$/d' Dockerfile
+          sed -i '/^ARG TARGETVARIANT$/d' Dockerfile
+          sed -i 's/\$TARGETARCH/amd64/g; s/\${TARGETARCH}/amd64/g' Dockerfile
+          sed -i 's/\$TARGETPLATFORM/linux\/amd64/g; s/\${TARGETPLATFORM}/linux\/amd64/g' Dockerfile
+          sed -i 's/\$BUILDPLATFORM/linux\/amd64/g; s/\${BUILDPLATFORM}/linux\/amd64/g' Dockerfile
+          sed -i 's/\$TARGETOS/linux/g; s/\${TARGETOS}/linux/g' Dockerfile
 
       - name: Build worker image
         uses: jeff-vincent/kindling/.github/actions/kindling-build@main
         with:
           name: worker
-          context: "${{ github.workspace }}/worker"
+          context: ${{ github.workspace }}/worker
           image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
           timeout: "900"
 
+      - name: Build seed-data image
+        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
+        with:
+          name: seed-data
+          context: ${{ github.workspace }}/seed-data
+          image: "${{ env.REGISTRY }}/seed-data:${{ env.TAG }}"
+
       # -- Deploy in dependency order --
+
+      - name: Deploy result
+        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
+        with:
+          name: "${{ github.actor }}-result"
+          image: "${{ env.REGISTRY }}/result:${{ env.TAG }}"
+          port: "80"
+          ingress-host: "${{ github.actor }}-result.localhost"
+          health-check-path: "/"
+          labels: |
+            app.kubernetes.io/part-of: example-voting-app
+            app.kubernetes.io/component: result
+            apps.example.com/github-username: ${{ github.actor }}
+          dependencies: |
+            - type: postgres
+            - type: redis
 
       - name: Deploy vote
         uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
@@ -67,39 +105,41 @@ jobs:
           dependencies: |
             - type: redis
 
-      - name: Deploy result
-        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
-        with:
-          name: "${{ github.actor }}-result"
-          image: "${{ env.REGISTRY }}/result:${{ env.TAG }}"
-          port: "80"
-          ingress-host: "${{ github.actor }}-result.localhost"
-          health-check-path: "/"
-          labels: |
-            app.kubernetes.io/part-of: example-voting-app
-            app.kubernetes.io/component: result
-            apps.example.com/github-username: ${{ github.actor }}
-          dependencies: |
-            - type: postgres
-
       - name: Deploy worker
         uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
         with:
           name: "${{ github.actor }}-worker"
           image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
           port: "80"
-          ingress-host: "${{ github.actor }}-worker.localhost"
           labels: |
             app.kubernetes.io/part-of: example-voting-app
             app.kubernetes.io/component: worker
             apps.example.com/github-username: ${{ github.actor }}
           dependencies: |
-            - type: redis
             - type: postgres
+            - type: redis
+
+      - name: Deploy seed-data
+        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
+        with:
+          name: "${{ github.actor }}-seed-data"
+          image: "${{ env.REGISTRY }}/seed-data:${{ env.TAG }}"
+          port: "80"
+          labels: |
+            app.kubernetes.io/part-of: example-voting-app
+            app.kubernetes.io/component: seed-data
+            apps.example.com/github-username: ${{ github.actor }}
+          dependencies: |
+            - type: postgres
+          env: |
+            # Requires: kindling secrets set POSTGRES_PASSWORD <VALUE>
+            - name: POSTGRES_PASSWORD
+              secretKeyRef:
+                name: kindling-secret-postgres-password
+                key: value
 
       - name: Summary
         run: |
           echo "🎉 Deploy complete!"
-          echo "🌐 Vote:  http://${{ github.actor }}-vote.localhost"
           echo "🌐 Result: http://${{ github.actor }}-result.localhost"
-          echo "🌐 Worker: http://${{ github.actor }}-worker.localhost"
+          echo "🌐 Vote: http://${{ github.actor }}-vote.localhost"
