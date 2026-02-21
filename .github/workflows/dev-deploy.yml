@@ -65,13 +65,6 @@ jobs:
           image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
           timeout: "900"
 
-      - name: Build seed-data image
-        uses: jeff-vincent/kindling/.github/actions/kindling-build@main
-        with:
-          name: seed-data
-          context: ${{ github.workspace }}/seed-data
-          image: "${{ env.REGISTRY }}/seed-data:${{ env.TAG }}"
-
       # -- Deploy in dependency order --
 
       - name: Deploy result
@@ -111,6 +104,8 @@ jobs:
           name: "${{ github.actor }}-worker"
           image: "${{ env.REGISTRY }}/worker:${{ env.TAG }}"
           port: "80"
+          ingress-host: "${{ github.actor }}-worker.localhost"
+          health-check-path: "/actuator/health"
           labels: |
             app.kubernetes.io/part-of: example-voting-app
             app.kubernetes.io/component: worker
@@ -118,22 +113,8 @@ jobs:
           dependencies: |
             - type: postgres
             - type: redis
-
-      - name: Deploy seed-data
-        uses: jeff-vincent/kindling/.github/actions/kindling-deploy@main
-        with:
-          name: "${{ github.actor }}-seed-data"
-          image: "${{ env.REGISTRY }}/seed-data:${{ env.TAG }}"
-          port: "80"
-          labels: |
-            app.kubernetes.io/part-of: example-voting-app
-            app.kubernetes.io/component: seed-data
-            apps.example.com/github-username: ${{ github.actor }}
-          dependencies: |
-            - type: postgres
           env: |
-            # Requires: kindling secrets set POSTGRES_PASSWORD <VALUE>
-            - name: POSTGRES_PASSWORD
+            POSTGRES_PASSWORD:
               secretKeyRef:
                 name: kindling-secret-postgres-password
                 key: value
@@ -143,3 +124,4 @@ jobs:
           echo "🎉 Deploy complete!"
           echo "🌐 Result: http://${{ github.actor }}-result.localhost"
           echo "🌐 Vote: http://${{ github.actor }}-vote.localhost"
+          echo "🌐 Worker: http://${{ github.actor }}-worker.localhost"
